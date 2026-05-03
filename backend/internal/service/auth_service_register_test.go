@@ -73,6 +73,11 @@ type defaultSubscriptionAssignerStub struct {
 
 type refreshTokenCacheStub struct{}
 
+type registrationEmailBlocklistRepoStub struct {
+	blocked bool
+	err     error
+}
+
 func (s *defaultSubscriptionAssignerStub) AssignOrExtendSubscription(_ context.Context, input *AssignSubscriptionInput) (*UserSubscription, bool, error) {
 	if input != nil {
 		s.calls = append(s.calls, *input)
@@ -121,6 +126,17 @@ func (s *refreshTokenCacheStub) GetFamilyTokenHashes(context.Context, string) ([
 
 func (s *refreshTokenCacheStub) IsTokenInFamily(context.Context, string, string) (bool, error) {
 	return false, nil
+}
+
+func (s *registrationEmailBlocklistRepoStub) IsRegistrationEmailBlocked(context.Context, string) (bool, error) {
+	if s.err != nil {
+		return false, s.err
+	}
+	return s.blocked, nil
+}
+
+func (s *registrationEmailBlocklistRepoStub) UpsertRegistrationEmailBlocklist(context.Context, []RegistrationEmailBlocklistEntry) (int, error) {
+	return 0, nil
 }
 
 func (s *emailCacheStub) GetVerificationCode(ctx context.Context, email string) (*VerificationCodeData, error) {
@@ -179,6 +195,10 @@ func (s *emailCacheStub) IncrNotifyCodeUserRate(ctx context.Context, userID int6
 }
 
 func newAuthService(repo *userRepoStub, settings map[string]string, emailCache EmailCache) *AuthService {
+	return newAuthServiceWithBlocklist(repo, settings, emailCache, nil)
+}
+
+func newAuthServiceWithBlocklist(repo *userRepoStub, settings map[string]string, emailCache EmailCache, blocklistRepo RegistrationEmailBlocklistRepository) *AuthService {
 	cfg := &config.Config{
 		JWT: config.JWTConfig{
 			Secret:     "test-secret",
@@ -213,6 +233,7 @@ func newAuthService(repo *userRepoStub, settings map[string]string, emailCache E
 		nil, // promoService
 		nil, // defaultSubAssigner
 		nil, // affiliateService
+		blocklistRepo,
 	)
 }
 
@@ -335,6 +356,18 @@ func TestAuthService_Register_EmailSuffixAllowed(t *testing.T) {
 	require.Equal(t, int64(8), user.ID)
 }
 
+func TestAuthService_Register_DisposableEmailNotAllowed(t *testing.T) {
+	repo := &userRepoStub{}
+	service := newAuthServiceWithBlocklist(repo, map[string]string{
+		SettingKeyRegistrationEnabled: "true",
+	}, nil, &registrationEmailBlocklistRepoStub{blocked: true})
+
+	_, _, err := service.Register(context.Background(), "user@mailinator.com", "password")
+	require.ErrorIs(t, err, ErrDisposableEmailNotAllowed)
+	appErr := infraerrors.FromError(err)
+	require.Equal(t, "DISPOSABLE_EMAIL_NOT_ALLOWED", appErr.Reason)
+}
+
 func TestAuthService_SendVerifyCode_EmailSuffixNotAllowed(t *testing.T) {
 	repo := &userRepoStub{}
 	service := newAuthService(repo, map[string]string{
@@ -348,6 +381,16 @@ func TestAuthService_SendVerifyCode_EmailSuffixNotAllowed(t *testing.T) {
 	require.Contains(t, appErr.Message, "@example.com")
 	require.Contains(t, appErr.Message, "@company.com")
 	require.Equal(t, "2", appErr.Metadata["allowed_suffix_count"])
+}
+
+func TestAuthService_SendVerifyCode_DisposableEmailNotAllowed(t *testing.T) {
+	repo := &userRepoStub{}
+	service := newAuthServiceWithBlocklist(repo, map[string]string{
+		SettingKeyRegistrationEnabled: "true",
+	}, nil, &registrationEmailBlocklistRepoStub{blocked: true})
+
+	err := service.SendVerifyCode(context.Background(), "user@nimail.cn")
+	require.ErrorIs(t, err, ErrDisposableEmailNotAllowed)
 }
 
 func TestAuthService_Register_CreateError(t *testing.T) {

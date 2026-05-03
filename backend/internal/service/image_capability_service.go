@@ -281,7 +281,7 @@ func maskAPIKeyForDisplay(key string) string {
 }
 
 func defaultImageCapabilityCatalog() []ImageCapabilityModel {
-	sizes := []string{"1024x1024", "1536x1024", "1024x1536"}
+	sizes := []string{"1024x1024", "1536x1024"}
 	return []ImageCapabilityModel{
 		{ID: "gpt-image-2", DisplayName: "GPT Image 2", Sizes: sizes},
 		{ID: "gpt-image-1.5", DisplayName: "GPT Image 1.5", Sizes: sizes},

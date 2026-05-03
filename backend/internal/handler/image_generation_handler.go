@@ -2,6 +2,8 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"net/http"
 	"strconv"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -68,6 +70,10 @@ func (h *ImageGenerationHandler) Create(c *gin.Context) {
 		Prompt:   req.Prompt,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrImageGenerationAlreadyProcessing) {
+			response.Error(c, http.StatusConflict, "Current image generation is still processing")
+			return
+		}
 		response.BadRequest(c, err.Error())
 		return
 	}

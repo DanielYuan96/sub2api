@@ -98,6 +98,7 @@ func provideCleanup(
 	backupSvc *service.BackupService,
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
 	channelMonitorRunner *service.ChannelMonitorRunner,
+	disposableEmailDomainSync *service.DisposableEmailDomainSyncService,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -113,6 +114,12 @@ func provideCleanup(
 			{"OpsScheduledReportService", func() error {
 				if opsScheduledReport != nil {
 					opsScheduledReport.Stop()
+				}
+				return nil
+			}},
+			{"DisposableEmailDomainSyncService", func() error {
+				if disposableEmailDomainSync != nil {
+					disposableEmailDomainSync.Stop()
 				}
 				return nil
 			}},

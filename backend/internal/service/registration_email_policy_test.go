@@ -29,3 +29,25 @@ func TestIsRegistrationEmailSuffixAllowed(t *testing.T) {
 	require.False(t, IsRegistrationEmailSuffixAllowed("user@sub.example.com", []string{"@example.com"}))
 	require.True(t, IsRegistrationEmailSuffixAllowed("user@any.com", []string{}))
 }
+
+func TestRegistrationEmailBlocklistLookup(t *testing.T) {
+	email, domains, ok := RegistrationEmailBlocklistLookup("User@Sub.Example.COM")
+	require.True(t, ok)
+	require.Equal(t, "user@sub.example.com", email)
+	require.Equal(t, []string{"sub.example.com", "example.com", "com"}, domains)
+}
+
+func TestNormalizeRegistrationEmailBlocklistPattern(t *testing.T) {
+	email, err := NormalizeRegistrationEmailBlocklistPattern("User@Example.COM", RegistrationEmailBlocklistMatchEmail)
+	require.NoError(t, err)
+	require.Equal(t, "user@example.com", email)
+
+	domain, err := NormalizeRegistrationEmailBlocklistPattern("@Example.COM", RegistrationEmailBlocklistMatchDomain)
+	require.NoError(t, err)
+	require.Equal(t, "example.com", domain)
+}
+
+func TestParseDisposableEmailDomainList(t *testing.T) {
+	got := ParseDisposableEmailDomainList("mailinator.com\n# comment\n @Example.COM \ninvalid_domain\nmailinator.com")
+	require.Equal(t, []string{"mailinator.com", "example.com"}, got)
+}

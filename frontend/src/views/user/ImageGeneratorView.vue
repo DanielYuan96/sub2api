@@ -133,7 +133,7 @@
 
             <div class="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <p class="min-h-5 text-xs text-gray-500 dark:text-dark-300">
-                {{ selectedKeyMeta }}
+                {{ hasPendingGeneration ? t('imageGenerator.pendingTask') : selectedKeyMeta }}
               </p>
 
               <div class="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(180px,240px)_minmax(150px,200px)_minmax(112px,140px)_44px]">
@@ -141,26 +141,26 @@
                   v-model="selectedKeyId"
                   :options="keyOptions"
                   searchable
-                  :disabled="generating || capableKeys.length === 0"
+                  :disabled="generating || hasPendingGeneration || capableKeys.length === 0"
                   :placeholder="t('imageGenerator.selectKey')"
                 />
                 <Select
                   v-model="selectedModel"
                   :options="modelOptions"
-                  :disabled="generating || modelOptions.length === 0"
+                  :disabled="generating || hasPendingGeneration || modelOptions.length === 0"
                   :placeholder="t('imageGenerator.selectModel')"
                 />
                 <Select
                   v-model="selectedSize"
                   :options="sizeOptions"
-                  :disabled="generating || sizeOptions.length === 0"
+                  :disabled="generating || hasPendingGeneration || sizeOptions.length === 0"
                 />
                 <button
                   type="submit"
                   class="flex h-11 w-full items-center justify-center rounded-xl bg-primary-600 text-white transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500 dark:disabled:bg-dark-600 dark:disabled:text-dark-300"
-                  :disabled="generating || !canSubmit"
+                  :disabled="generating || hasPendingGeneration || !canSubmit"
                   :aria-label="t('imageGenerator.generate')"
-                  :title="t('imageGenerator.generate')"
+                  :title="hasPendingGeneration ? t('imageGenerator.pendingTask') : t('imageGenerator.generate')"
                 >
                   <Icon v-if="generating" name="refresh" size="md" class="animate-spin" />
                   <Icon v-else name="sparkles" size="md" :stroke-width="2" />
@@ -221,10 +221,18 @@ const modelOptions = computed(() =>
 
 const sizeOptions = computed(() => {
   const sizes = modelCatalog.value[selectedModel.value] || ['1024x1024']
-  return sizes.map((size) => ({
-    value: size,
-    label: formatSizeLabel(size),
-  }))
+  const seenLabels = new Set<string>()
+  return sizes
+    .map((size) => ({
+      value: size,
+      label: formatSizeLabel(size),
+    }))
+    .filter((option) => {
+      if (option.label !== '1K' && option.label !== '2K') return false
+      if (seenLabels.has(option.label)) return false
+      seenLabels.add(option.label)
+      return true
+    })
 })
 
 const selectedKeyMeta = computed(() => {
@@ -232,7 +240,10 @@ const selectedKeyMeta = computed(() => {
   return `${selectedKey.value.masked_key} · ${selectedKey.value.group.name}`
 })
 
+const hasPendingGeneration = computed(() => messages.value.some((message) => message.loading))
+
 const canSubmit = computed(() =>
+  !hasPendingGeneration.value &&
   !!selectedKey.value &&
   !!selectedModel.value &&
   !!selectedSize.value &&
@@ -258,10 +269,6 @@ watch(selectedModel, () => {
     selectedSize.value = sizes[0] || '1024x1024'
   }
 })
-
-watch(messages, () => {
-  scrollToBottom()
-}, { deep: true })
 
 onMounted(async () => {
   await Promise.all([
@@ -309,6 +316,7 @@ async function submit() {
         noImageReturned: t('imageGenerator.noImageReturned'),
       },
     })
+    await scrollToBottom()
   } catch (error) {
     prompt.value = requestPrompt
     appStore.showError((error as Error).message || t('imageGenerator.generateFailed'))
@@ -329,7 +337,7 @@ async function downloadImage(image: ImageGenerationStoredImage, index: number) {
 function formatSizeLabel(size: string): string {
   const normalized = size.trim()
   const upper = normalized.toUpperCase()
-  if (upper === '1K' || upper === '2K' || upper === '4K') return upper
+  if (upper === '1K' || upper === '2K') return upper
 
   const labels: Record<string, string> = {
     '1024x1024': '1K',

@@ -403,6 +403,7 @@ export default {
     result: '生成结果',
     resultIdle: '等待生成',
     waiting: '正在等待上游返回',
+    pendingTask: '当前生图任务尚未完成，请等待完成后再发送下一条请求。',
     emptyResult: '生成后的图片会显示在这里',
     noCapableKeys: '当前账号没有可用的生图 API Key。请先创建一个绑定 OpenAI 生图分组的 API Key，或检查余额、配额和分组配置。',
     loadFailed: '加载生图配置失败',

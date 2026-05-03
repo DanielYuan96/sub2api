@@ -403,6 +403,7 @@ export default {
     result: 'Result',
     resultIdle: 'Waiting',
     waiting: 'Waiting for upstream response',
+    pendingTask: 'The current image generation is still processing. Please wait before sending another request.',
     emptyResult: 'Generated images will appear here',
     noCapableKeys: 'No image-capable API key is available for this account. Create an API key bound to an OpenAI image group, or check balance, quota, and group settings.',
     loadFailed: 'Failed to load image settings',

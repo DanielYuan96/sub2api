@@ -1516,6 +1516,34 @@ func (s *SettingService) GetRegistrationEmailSuffixWhitelist(ctx context.Context
 	return ParseRegistrationEmailSuffixWhitelist(value)
 }
 
+func (s *SettingService) IsDisposableEmailDomainSyncEnabled(ctx context.Context) bool {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyDisposableEmailSyncEnabled)
+	if err != nil {
+		return true
+	}
+	return value != "false"
+}
+
+func (s *SettingService) GetDisposableEmailDomainSyncURL(ctx context.Context) string {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyDisposableEmailSyncURL)
+	if err != nil || strings.TrimSpace(value) == "" {
+		return defaultDisposableEmailDomainSyncURL
+	}
+	return strings.TrimSpace(value)
+}
+
+func (s *SettingService) GetDisposableEmailDomainSyncIntervalHours(ctx context.Context) int {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyDisposableEmailSyncIntervalHours)
+	if err != nil {
+		return defaultDisposableEmailDomainSyncIntervalHours
+	}
+	hours, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || hours <= 0 {
+		return defaultDisposableEmailDomainSyncIntervalHours
+	}
+	return hours
+}
+
 // IsPromoCodeEnabled 检查是否启用优惠码功能
 func (s *SettingService) IsPromoCodeEnabled(ctx context.Context) bool {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyPromoCodeEnabled)
@@ -1799,6 +1827,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyRegistrationEnabled:                      "true",
 		SettingKeyEmailVerifyEnabled:                       "false",
 		SettingKeyRegistrationEmailSuffixWhitelist:         "[]",
+		SettingKeyDisposableEmailSyncEnabled:               "true",
+		SettingKeyDisposableEmailSyncURL:                   defaultDisposableEmailDomainSyncURL,
+		SettingKeyDisposableEmailSyncIntervalHours:         strconv.Itoa(defaultDisposableEmailDomainSyncIntervalHours),
 		SettingKeyPromoCodeEnabled:                         "true", // 默认启用优惠码功能
 		SettingKeySiteName:                                 "API2Code",
 		SettingKeySiteLogo:                                 "",

@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
 type ImageGenerationStatus string
@@ -22,6 +22,8 @@ const (
 	ImageGenerationStatusCompleted  ImageGenerationStatus = "completed"
 	ImageGenerationStatusFailed     ImageGenerationStatus = "failed"
 )
+
+var ErrImageGenerationAlreadyProcessing = errors.New("current image generation is still processing")
 
 type ImageGenerationRecord struct {
 	ID           int64           `json:"id"`
@@ -119,6 +121,20 @@ func (s *ImageGenerationHistoryService) Create(ctx context.Context, input Create
 	}
 	if prompt == "" {
 		return nil, errors.New("prompt is required")
+	}
+
+	var hasProcessing bool
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM user_image_generations
+			WHERE user_id = $1 AND status = 'processing'
+		)
+	`, input.UserID).Scan(&hasProcessing); err != nil {
+		return nil, fmt.Errorf("check processing image generation: %w", err)
+	}
+	if hasProcessing {
+		return nil, ErrImageGenerationAlreadyProcessing
 	}
 
 	var keyName string

@@ -1,5 +1,5 @@
 # =============================================================================
-# Sub2API Multi-Stage Dockerfile
+# API2Code Multi-Stage Dockerfile
 # =============================================================================
 # Stage 1: Build frontend
 # Stage 2: Build Go backend with embedded frontend
@@ -20,6 +20,9 @@ FROM ${NODE_IMAGE} AS frontend-builder
 
 WORKDIR /app/frontend
 
+# vue-tsc + vite can exceed Node's small container-detected default heap on 2C/4G VPS builds.
+ENV NODE_OPTIONS=--max-old-space-size=2048
+
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
@@ -29,7 +32,7 @@ RUN pnpm install --frozen-lockfile
 
 # Copy frontend source and build
 COPY frontend/ ./
-RUN pnpm run build
+RUN pnpm exec vite build
 
 # -----------------------------------------------------------------------------
 # Stage 2: Backend Builder
@@ -85,7 +88,7 @@ FROM ${ALPINE_IMAGE}
 
 # Labels
 LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
-LABEL description="Sub2API - AI API Gateway Platform"
+LABEL description="API2Code - AI API Gateway Platform"
 LABEL org.opencontainers.image.source="https://github.com/Wei-Shaw/sub2api"
 
 # Install runtime dependencies

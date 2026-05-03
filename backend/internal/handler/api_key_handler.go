@@ -18,13 +18,15 @@ import (
 
 // APIKeyHandler handles API key-related requests
 type APIKeyHandler struct {
-	apiKeyService *service.APIKeyService
+	apiKeyService          *service.APIKeyService
+	imageCapabilityService *service.ImageCapabilityService
 }
 
 // NewAPIKeyHandler creates a new APIKeyHandler
-func NewAPIKeyHandler(apiKeyService *service.APIKeyService) *APIKeyHandler {
+func NewAPIKeyHandler(apiKeyService *service.APIKeyService, imageCapabilityService *service.ImageCapabilityService) *APIKeyHandler {
 	return &APIKeyHandler{
-		apiKeyService: apiKeyService,
+		apiKeyService:          apiKeyService,
+		imageCapabilityService: imageCapabilityService,
 	}
 }
 
@@ -308,4 +310,25 @@ func (h *APIKeyHandler) GetUserGroupRates(c *gin.Context) {
 	}
 
 	response.Success(c, rates)
+}
+
+// ListImageCapableKeys handles listing API keys that can use OpenAI Images.
+// GET /api/v1/user/image-capable-keys
+func (h *APIKeyHandler) ListImageCapableKeys(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if h.imageCapabilityService == nil {
+		response.InternalError(c, "image capability service unavailable")
+		return
+	}
+
+	result, err := h.imageCapabilityService.ListUserImageCapableKeys(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }

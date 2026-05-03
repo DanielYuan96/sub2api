@@ -564,6 +564,97 @@ export interface ApiKey {
   reset_7d_at: string | null
 }
 
+export interface ImageModelOption {
+  id: string
+  display_name?: string
+  sizes: string[]
+}
+
+export interface ImageCapableKeyModel {
+  id: string
+  mapped_model: string
+  capability: string
+}
+
+export interface ImageCapableKey {
+  id: number
+  name: string
+  masked_key: string
+  group: {
+    id: number
+    name: string
+    platform: string
+  }
+  models: ImageCapableKeyModel[]
+  default_model: string
+  billing_mode: string
+  limits: {
+    user_concurrency: number
+    effective_rpm_limit: number
+  }
+}
+
+export interface ImageCapableKeysResponse {
+  default_model: string
+  keys: ImageCapableKey[]
+  empty_reason: string | null
+  models: ImageModelOption[]
+}
+
+export interface GenerateImageRequest {
+  model: string
+  prompt: string
+  size?: string
+  n?: number
+}
+
+export interface GeneratedImageItem {
+  url?: string
+  b64_json?: string
+  revised_prompt?: string
+}
+
+export interface GenerateImageResponse {
+  created?: number
+  data: GeneratedImageItem[]
+}
+
+export type ImageGenerationStatus = 'processing' | 'completed' | 'failed'
+
+export interface ImageGenerationStoredImage {
+  src: string
+  revisedPrompt?: string
+}
+
+export interface ImageGenerationRecord {
+  id: number
+  user_id: number
+  api_key_id?: number | null
+  api_key_name: string
+  model: string
+  size: string
+  prompt: string
+  status: ImageGenerationStatus
+  images: ImageGenerationStoredImage[]
+  error_message: string
+  created_at: string
+  updated_at: string
+  completed_at?: string | null
+}
+
+export interface CreateImageGenerationRecordRequest {
+  api_key_id: number
+  model: string
+  size?: string
+  prompt: string
+}
+
+export interface UpdateImageGenerationRecordRequest {
+  status: ImageGenerationStatus
+  images?: ImageGenerationStoredImage[]
+  error_message?: string
+}
+
 export interface CreateApiKeyRequest {
   name: string
   group_id?: number | null

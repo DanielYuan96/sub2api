@@ -503,6 +503,7 @@ var ProviderSet = wire.NewSet(
 	NewGroupCapacityService,
 	NewChannelService,
 	NewModelPricingResolver,
+	NewImageGenerationHistoryService,
 	NewAffiliateService,
 	ProvidePaymentConfigService,
 	NewPaymentService,

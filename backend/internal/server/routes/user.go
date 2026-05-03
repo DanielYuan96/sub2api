@@ -24,6 +24,9 @@ func RegisterUserRoutes(
 		{
 			user.GET("/profile", h.User.GetProfile)
 			user.GET("/image-capable-keys", h.APIKey.ListImageCapableKeys)
+			user.GET("/image-generations", h.ImageGeneration.List)
+			user.POST("/image-generations", h.ImageGeneration.Create)
+			user.PATCH("/image-generations/:id", h.ImageGeneration.Update)
 			user.PUT("/password", h.User.ChangePassword)
 			user.PUT("", h.User.UpdateProfile)
 			user.GET("/aff", h.User.GetAffiliate)

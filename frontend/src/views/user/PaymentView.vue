@@ -36,8 +36,42 @@
               <p class="mt-1 text-base font-semibold text-gray-900 dark:text-white">{{ user?.username || '' }}</p>
               <p class="mt-0.5 text-sm font-medium text-green-600 dark:text-green-400">{{ t('payment.currentBalance') }}: {{ user?.balance?.toFixed(2) || '0.00' }}</p>
             </div>
-            <div v-if="enabledMethods.length === 0" class="card py-16 text-center">
-              <p class="text-gray-500 dark:text-gray-400">{{ t('payment.notAvailable') }}</p>
+            <div v-if="enabledMethods.length === 0" class="card p-6">
+              <div class="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <h2 class="text-xl font-bold text-gray-900 dark:text-white">选择充值额度</h2>
+                <span class="text-sm font-medium text-gray-400 dark:text-gray-500">(1 $ = 1.00 ¥)</span>
+              </div>
+              <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <template v-for="preset in externalRechargePresets" :key="preset.amount">
+                  <a
+                    v-if="preset.enabled"
+                    :href="preset.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="group relative flex min-h-[150px] flex-col justify-center rounded-lg border border-gray-200 bg-white px-6 py-5 text-center transition hover:-translate-y-0.5 hover:border-primary-400 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary-500/60 dark:border-dark-700 dark:bg-dark-900 dark:hover:border-primary-500"
+                    :aria-label="`充值 ${preset.amount} 元`"
+                  >
+                    <Icon name="dollar" size="lg" class="absolute left-5 top-5 text-gray-700 transition group-hover:text-primary-600 dark:text-gray-200 dark:group-hover:text-primary-400" :stroke-width="2.2" />
+                    <div class="text-2xl font-bold text-gray-900 dark:text-white">{{ preset.amount }} ¥</div>
+                    <div class="mt-5 text-sm leading-7 text-gray-500 dark:text-gray-400">
+                      <p>实付 ¥{{ preset.amount.toFixed(2) }}，节省</p>
+                      <p>¥0.00</p>
+                    </div>
+                  </a>
+                  <div
+                    v-else
+                    class="relative flex min-h-[150px] cursor-not-allowed flex-col justify-center rounded-lg border border-gray-200 bg-gray-100 px-6 py-5 text-center opacity-60 dark:border-dark-700 dark:bg-dark-800"
+                    :aria-label="`充值 ${preset.amount} 元暂不可用`"
+                  >
+                    <Icon name="dollar" size="lg" class="absolute left-5 top-5 text-gray-400 dark:text-gray-500" :stroke-width="2.2" />
+                    <div class="text-2xl font-bold text-gray-500 dark:text-gray-400">{{ preset.amount }} ¥</div>
+                    <div class="mt-5 text-sm leading-7 text-gray-400 dark:text-gray-500">
+                      <p>实付 ¥{{ preset.amount.toFixed(2) }}，节省</p>
+                      <p>¥0.00</p>
+                    </div>
+                  </div>
+                </template>
+              </div>
             </div>
             <template v-else>
             <div class="card p-6">
@@ -303,6 +337,14 @@ const amount = ref<number | null>(null)
 const selectedMethod = ref('')
 const selectedPlan = ref<SubscriptionPlan | null>(null)
 const previewImage = ref('')
+const externalRechargePresets = [
+  { amount: 10, url: 'https://pay.ldxp.cn/item/ssiyvk', enabled: true },
+  { amount: 20, url: 'https://pay.ldxp.cn/item/3farer', enabled: true },
+  { amount: 50, url: '', enabled: false },
+  { amount: 100, url: '', enabled: false },
+  { amount: 200, url: '', enabled: false },
+  { amount: 500, url: '', enabled: false },
+]
 
 const paymentPhase = ref<'select' | 'paying'>('select')
 

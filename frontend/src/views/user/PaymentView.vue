@@ -195,7 +195,7 @@
                   </div>
                 </div>
               </div>
-              <button :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="!canSubmitSubscription || submitting" @click="confirmSubscribe">
+              <button :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="submitting" @click="goExternalSubscriptionPayment">
                 <span v-if="submitting" class="flex items-center justify-center gap-2">
                   <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
                   {{ t('common.processing') }}
@@ -345,6 +345,7 @@ const externalRechargePresets = [
   { amount: 200, url: '', enabled: false },
   { amount: 500, url: '', enabled: false },
 ]
+const externalSubscriptionPaymentUrl = 'https://pay.ldxp.cn/item/klw2iv'
 
 const paymentPhase = ref<'select' | 'paying'>('select')
 
@@ -635,12 +636,6 @@ const subTotalAmount = computed(() => {
   return Math.round((price + subFeeAmount.value) * 100) / 100
 })
 
-const canSubmitSubscription = computed(() =>
-  selectedPlan.value !== null
-    && amountFitsMethod(selectedPlan.value.price, selectedMethod.value)
-    && selectedLimit.value?.available !== false
-)
-
 // Auto-switch to first available method when current selection can't handle the amount
 watch(() => [validAmount.value, selectedMethod.value] as const, ([amt, method]) => {
   if (amt <= 0 || amountFitsMethod(amt, method)) return
@@ -700,9 +695,9 @@ async function handleSubmitRecharge() {
   await createOrder(validAmount.value, 'balance')
 }
 
-async function confirmSubscribe() {
-  if (!selectedPlan.value || submitting.value) return
-  await createOrder(selectedPlan.value.price, 'subscription', selectedPlan.value.id)
+function goExternalSubscriptionPayment() {
+  if (typeof window === 'undefined') return
+  window.open(externalSubscriptionPaymentUrl, '_blank', 'noopener,noreferrer')
 }
 
 async function createOrder(orderAmount: number, orderType: OrderType, planId?: number, options: CreateOrderOptions = {}) {

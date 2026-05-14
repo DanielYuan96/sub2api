@@ -23,8 +23,8 @@ WORKDIR /app/frontend
 # vue-tsc + vite can exceed Node's small container-detected default heap on 2C/4G VPS builds.
 ENV NODE_OPTIONS=--max-old-space-size=2048
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Install pnpm (pin v9 for lockfile/build-script behavior stability)
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 # Install dependencies first (better caching)
 COPY frontend/package.json frontend/pnpm-lock.yaml ./

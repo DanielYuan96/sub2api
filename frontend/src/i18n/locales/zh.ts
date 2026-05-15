@@ -389,11 +389,12 @@ export default {
 
   imageGenerator: {
     title: 'AI 生图',
-    description: '像聊天一样输入提示词，选择 API、模型和尺寸后生成图片。',
+    description: '像聊天一样输入提示词，选择 API 和模型后生成图片，尺寸比例由模型根据提示词自动决定。',
     controls: '生成配置',
     apiKey: 'API Key',
     model: '模型',
     size: '尺寸',
+    autoSize: '自动',
     prompt: '提示词',
     promptPlaceholder: '例如：生成一只戴宇航员头盔的橘猫，像素插画风格，纯色背景。',
     selectKey: '选择 API Key',
@@ -405,6 +406,10 @@ export default {
     resultIdle: '等待生成',
     waiting: '正在等待上游返回',
     pendingTask: '当前生图任务尚未完成，请等待完成后再发送下一条请求。',
+    cancelTask: '终止任务',
+    cancelling: '终止中...',
+    cancelFailed: '终止任务失败',
+    cancelledMessage: '任务已终止',
     emptyResult: '生成后的图片会显示在这里',
     noCapableKeys: '当前账号没有可用的生图 API Key。请先创建一个绑定 OpenAI 生图分组的 API Key，或检查余额、配额和分组配置。',
     loadFailed: '加载生图配置失败',
@@ -412,7 +417,13 @@ export default {
     noImageReturned: '请求成功，但没有返回图片',
     generatedMessage: '图片已生成',
     download: '下载',
-    imageAlt: '生成图片 {index}'
+    imageAlt: '生成图片 {index}',
+    addReferenceImage: '上传参考图',
+    removeReferenceImage: '移除参考图',
+    referenceImageAlt: '参考图 {index}',
+    referenceImageLimit: '最多只能上传 {count} 张参考图',
+    referenceImageTypeError: '参考图仅支持 PNG、JPG 或 WebP',
+    referenceImageSizeError: '单张参考图不能超过 5MB'
   },
 
   // Auth

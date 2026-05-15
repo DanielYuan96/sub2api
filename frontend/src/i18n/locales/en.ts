@@ -389,11 +389,12 @@ export default {
 
   imageGenerator: {
     title: 'AI Image',
-    description: 'Enter a prompt like chat, then choose the API, model, and size.',
+    description: 'Enter a prompt like chat, then choose the API and model. The model will decide the size and aspect ratio from the prompt.',
     controls: 'Generation Settings',
     apiKey: 'API Key',
     model: 'Model',
     size: 'Size',
+    autoSize: 'Auto',
     prompt: 'Prompt',
     promptPlaceholder: 'Example: Generate an orange cat astronaut sticker in pixel-art style on a solid background.',
     selectKey: 'Select API Key',
@@ -405,6 +406,10 @@ export default {
     resultIdle: 'Waiting',
     waiting: 'Waiting for upstream response',
     pendingTask: 'The current image generation is still processing. Please wait before sending another request.',
+    cancelTask: 'Cancel task',
+    cancelling: 'Cancelling...',
+    cancelFailed: 'Failed to cancel task',
+    cancelledMessage: 'Task cancelled',
     emptyResult: 'Generated images will appear here',
     noCapableKeys: 'No image-capable API key is available for this account. Create an API key bound to an OpenAI image group, or check balance, quota, and group settings.',
     loadFailed: 'Failed to load image settings',
@@ -412,7 +417,13 @@ export default {
     noImageReturned: 'Request succeeded but returned no image',
     generatedMessage: 'Image generated',
     download: 'Download',
-    imageAlt: 'Generated image {index}'
+    imageAlt: 'Generated image {index}',
+    addReferenceImage: 'Upload reference image',
+    removeReferenceImage: 'Remove reference image',
+    referenceImageAlt: 'Reference image {index}',
+    referenceImageLimit: 'Upload at most {count} reference images',
+    referenceImageTypeError: 'Reference images must be PNG, JPG, or WebP',
+    referenceImageSizeError: 'Each reference image must be 5MB or smaller'
   },
 
   // Auth

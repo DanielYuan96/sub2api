@@ -68,12 +68,18 @@ export async function updateImageGenerationRecord(
   return data
 }
 
+export async function cancelImageGenerationRecord(id: number): Promise<ImageGenerationRecord> {
+  const { data } = await apiClient.post<ImageGenerationRecord>(`/user/image-generations/${id}/cancel`)
+  return data
+}
+
 export const imagesAPI = {
   listImageCapableKeys,
   generateImage,
   listImageGenerationRecords,
   createImageGenerationRecord,
-  updateImageGenerationRecord
+  updateImageGenerationRecord,
+  cancelImageGenerationRecord
 }
 
 export default imagesAPI

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -21,32 +23,42 @@ const (
 	ImageGenerationStatusProcessing ImageGenerationStatus = "processing"
 	ImageGenerationStatusCompleted  ImageGenerationStatus = "completed"
 	ImageGenerationStatusFailed     ImageGenerationStatus = "failed"
+	ImageGenerationStatusCancelled  ImageGenerationStatus = "cancelled"
 )
 
 var ErrImageGenerationAlreadyProcessing = errors.New("current image generation is still processing")
+var errImageGenerationNotProcessing = errors.New("image generation task is not processing")
+
+const (
+	maxImageGenerationReferenceImages      = 3
+	maxImageGenerationReferenceImageBytes  = 5 << 20
+	maxImageGenerationReferenceImagesBytes = 15 << 20
+)
 
 type ImageGenerationRecord struct {
-	ID           int64           `json:"id"`
-	UserID       int64           `json:"user_id"`
-	APIKeyID     *int64          `json:"api_key_id,omitempty"`
-	APIKeyName   string          `json:"api_key_name"`
-	Model        string          `json:"model"`
-	Size         string          `json:"size"`
-	Prompt       string          `json:"prompt"`
-	Status       string          `json:"status"`
-	Images       json.RawMessage `json:"images"`
-	ErrorMessage string          `json:"error_message"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
-	CompletedAt  *time.Time      `json:"completed_at,omitempty"`
+	ID              int64           `json:"id"`
+	UserID          int64           `json:"user_id"`
+	APIKeyID        *int64          `json:"api_key_id,omitempty"`
+	APIKeyName      string          `json:"api_key_name"`
+	Model           string          `json:"model"`
+	Size            string          `json:"size"`
+	Prompt          string          `json:"prompt"`
+	Status          string          `json:"status"`
+	Images          json.RawMessage `json:"images"`
+	ReferenceImages json.RawMessage `json:"reference_images"`
+	ErrorMessage    string          `json:"error_message"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	CompletedAt     *time.Time      `json:"completed_at,omitempty"`
 }
 
 type CreateImageGenerationInput struct {
-	UserID   int64
-	APIKeyID int64
-	Model    string
-	Size     string
-	Prompt   string
+	UserID          int64
+	APIKeyID        int64
+	Model           string
+	Size            string
+	Prompt          string
+	ReferenceImages json.RawMessage
 }
 
 type UpdateImageGenerationInput struct {
@@ -58,9 +70,12 @@ type UpdateImageGenerationInput struct {
 }
 
 type ImageGenerationHistoryService struct {
-	db         *sql.DB
-	httpClient *http.Client
-	localURL   string
+	db                  *sql.DB
+	httpClient          *http.Client
+	localGenerationsURL string
+	localEditsURL       string
+	activeMu            sync.Mutex
+	activeTasks         map[int64]context.CancelFunc
 }
 
 func NewImageGenerationHistoryService(db *sql.DB, cfg *config.Config) *ImageGenerationHistoryService {
@@ -69,9 +84,11 @@ func NewImageGenerationHistoryService(db *sql.DB, cfg *config.Config) *ImageGene
 		port = cfg.Server.Port
 	}
 	return &ImageGenerationHistoryService{
-		db:         db,
-		httpClient: &http.Client{Timeout: 10 * time.Minute},
-		localURL:   fmt.Sprintf("http://127.0.0.1:%d/v1/images/generations", port),
+		db:                  db,
+		httpClient:          &http.Client{Timeout: 10 * time.Minute},
+		localGenerationsURL: fmt.Sprintf("http://127.0.0.1:%d/v1/images/generations", port),
+		localEditsURL:       fmt.Sprintf("http://127.0.0.1:%d/v1/images/edits", port),
+		activeTasks:         make(map[int64]context.CancelFunc),
 	}
 }
 
@@ -81,6 +98,7 @@ func (s *ImageGenerationHistoryService) List(ctx context.Context, userID int64, 
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, api_key_id, api_key_name, model, size, prompt, status, images,
+		       reference_images,
 		       error_message, created_at, updated_at, completed_at
 		FROM user_image_generations
 		WHERE user_id = $1
@@ -122,6 +140,10 @@ func (s *ImageGenerationHistoryService) Create(ctx context.Context, input Create
 	if prompt == "" {
 		return nil, errors.New("prompt is required")
 	}
+	referenceImages, err := normalizeImageGenerationReferenceImages(input.ReferenceImages)
+	if err != nil {
+		return nil, err
+	}
 
 	var hasProcessing bool
 	if err := s.db.QueryRowContext(ctx, `
@@ -138,7 +160,7 @@ func (s *ImageGenerationHistoryService) Create(ctx context.Context, input Create
 	}
 
 	var keyName string
-	err := s.db.QueryRowContext(ctx, `
+	err = s.db.QueryRowContext(ctx, `
 		SELECT name
 		FROM api_keys
 		WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
@@ -152,11 +174,12 @@ func (s *ImageGenerationHistoryService) Create(ctx context.Context, input Create
 
 	row := s.db.QueryRowContext(ctx, `
 		INSERT INTO user_image_generations (
-			user_id, api_key_id, api_key_name, model, size, prompt, status, images
-		) VALUES ($1, $2, $3, $4, $5, $6, 'processing', '[]'::jsonb)
+			user_id, api_key_id, api_key_name, model, size, prompt, status, images, reference_images
+		) VALUES ($1, $2, $3, $4, $5, $6, 'processing', '[]'::jsonb, $7::jsonb)
 		RETURNING id, user_id, api_key_id, api_key_name, model, size, prompt, status, images,
+		          reference_images,
 		          error_message, created_at, updated_at, completed_at
-	`, input.UserID, input.APIKeyID, keyName, model, size, prompt)
+	`, input.UserID, input.APIKeyID, keyName, model, size, prompt, string(referenceImages))
 
 	record, err := scanImageGenerationRecord(row)
 	if err != nil {
@@ -178,7 +201,8 @@ func (s *ImageGenerationHistoryService) Update(ctx context.Context, input Update
 	status := strings.TrimSpace(input.Status)
 	if status != string(ImageGenerationStatusProcessing) &&
 		status != string(ImageGenerationStatusCompleted) &&
-		status != string(ImageGenerationStatusFailed) {
+		status != string(ImageGenerationStatusFailed) &&
+		status != string(ImageGenerationStatusCancelled) {
 		return nil, errors.New("invalid status")
 	}
 	images := input.Images
@@ -196,9 +220,10 @@ func (s *ImageGenerationHistoryService) Update(ctx context.Context, input Update
 		    images = $2::jsonb,
 		    error_message = $3,
 		    updated_at = NOW(),
-		    completed_at = CASE WHEN $1::text IN ('completed', 'failed') THEN COALESCE(completed_at, NOW()) ELSE completed_at END
+		    completed_at = CASE WHEN $1::text IN ('completed', 'failed', 'cancelled') THEN COALESCE(completed_at, NOW()) ELSE completed_at END
 		WHERE id = $4 AND user_id = $5
 		RETURNING id, user_id, api_key_id, api_key_name, model, size, prompt, status, images,
+		          reference_images,
 		          error_message, created_at, updated_at, completed_at
 	`, status, string(images), errorMessage, input.ID, input.UserID)
 
@@ -212,18 +237,81 @@ func (s *ImageGenerationHistoryService) Update(ctx context.Context, input Update
 	return &record, nil
 }
 
+func (s *ImageGenerationHistoryService) Cancel(ctx context.Context, userID, id int64) (*ImageGenerationRecord, error) {
+	if userID <= 0 {
+		return nil, errors.New("user_id is required")
+	}
+	if id <= 0 {
+		return nil, errors.New("image generation ID is required")
+	}
+
+	row := s.db.QueryRowContext(ctx, `
+		UPDATE user_image_generations
+		SET status = 'cancelled',
+		    images = '[]'::jsonb,
+		    error_message = '',
+		    updated_at = NOW(),
+		    completed_at = COALESCE(completed_at, NOW())
+		WHERE id = $1 AND user_id = $2 AND status = 'processing'
+		RETURNING id, user_id, api_key_id, api_key_name, model, size, prompt, status, images,
+		          reference_images,
+		          error_message, created_at, updated_at, completed_at
+	`, id, userID)
+
+	record, err := scanImageGenerationRecord(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		record, loadErr := s.loadUserImageGenerationRecord(ctx, userID, id)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		return record, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cancel image generation: %w", err)
+	}
+	s.cancelActiveTask(id)
+	return &record, nil
+}
+
+func (s *ImageGenerationHistoryService) loadUserImageGenerationRecord(ctx context.Context, userID, id int64) (*ImageGenerationRecord, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, user_id, api_key_id, api_key_name, model, size, prompt, status, images,
+		       reference_images,
+		       error_message, created_at, updated_at, completed_at
+		FROM user_image_generations
+		WHERE id = $1 AND user_id = $2
+	`, id, userID)
+
+	record, err := scanImageGenerationRecord(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, errors.New("image generation record not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load image generation record: %w", err)
+	}
+	return &record, nil
+}
+
 func (s *ImageGenerationHistoryService) runImageGeneration(recordID int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
+	s.registerActiveTask(recordID, cancel)
+	defer s.unregisterActiveTask(recordID)
 
 	task, err := s.loadRunnableRecord(ctx, recordID)
 	if err != nil {
+		if errors.Is(err, errImageGenerationNotProcessing) || errors.Is(ctx.Err(), context.Canceled) {
+			return
+		}
 		_ = s.failRecord(context.Background(), recordID, 0, err.Error())
 		return
 	}
 
 	images, err := s.callImagesGateway(ctx, task)
 	if err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
+			return
+		}
 		_ = s.failRecord(context.Background(), recordID, task.UserID, err.Error())
 		return
 	}
@@ -237,22 +325,18 @@ func (s *ImageGenerationHistoryService) runImageGeneration(recordID int64) {
 		_ = s.failRecord(context.Background(), recordID, task.UserID, "Failed to encode image results")
 		return
 	}
-	_, _ = s.Update(context.Background(), UpdateImageGenerationInput{
-		UserID: task.UserID,
-		ID:     recordID,
-		Status: string(ImageGenerationStatusCompleted),
-		Images: raw,
-	})
+	_ = s.completeRecord(context.Background(), recordID, task.UserID, raw)
 }
 
 type runnableImageGenerationRecord struct {
-	ID     int64
-	UserID int64
-	APIKey string
-	Model  string
-	Size   string
-	Prompt string
-	Status string
+	ID              int64
+	UserID          int64
+	APIKey          string
+	Model           string
+	Size            string
+	Prompt          string
+	Status          string
+	ReferenceImages json.RawMessage
 }
 
 type storedImageResult struct {
@@ -263,11 +347,11 @@ type storedImageResult struct {
 func (s *ImageGenerationHistoryService) loadRunnableRecord(ctx context.Context, recordID int64) (*runnableImageGenerationRecord, error) {
 	var task runnableImageGenerationRecord
 	err := s.db.QueryRowContext(ctx, `
-		SELECT g.id, g.user_id, k.key, g.model, g.size, g.prompt, g.status
+		SELECT g.id, g.user_id, k.key, g.model, g.size, g.prompt, g.status, g.reference_images
 		FROM user_image_generations g
 		JOIN api_keys k ON k.id = g.api_key_id AND k.user_id = g.user_id AND k.deleted_at IS NULL
 		WHERE g.id = $1
-	`, recordID).Scan(&task.ID, &task.UserID, &task.APIKey, &task.Model, &task.Size, &task.Prompt, &task.Status)
+	`, recordID).Scan(&task.ID, &task.UserID, &task.APIKey, &task.Model, &task.Size, &task.Prompt, &task.Status, &task.ReferenceImages)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errors.New("image generation task not found")
 	}
@@ -275,24 +359,40 @@ func (s *ImageGenerationHistoryService) loadRunnableRecord(ctx context.Context, 
 		return nil, fmt.Errorf("load image generation task: %w", err)
 	}
 	if task.Status != string(ImageGenerationStatusProcessing) {
-		return nil, fmt.Errorf("image generation task is already %s", task.Status)
+		return nil, fmt.Errorf("%w: %s", errImageGenerationNotProcessing, task.Status)
 	}
 	return &task, nil
 }
 
 func (s *ImageGenerationHistoryService) callImagesGateway(ctx context.Context, task *runnableImageGenerationRecord) ([]storedImageResult, error) {
-	body, err := json.Marshal(map[string]any{
+	references, err := decodeImageGenerationReferenceImages(task.ReferenceImages)
+	if err != nil {
+		return nil, err
+	}
+
+	requestPayload := map[string]any{
 		"model":           task.Model,
 		"prompt":          task.Prompt,
 		"size":            task.Size,
 		"n":               1,
 		"response_format": "b64_json",
-	})
+	}
+	requestURL := s.localGenerationsURL
+	if len(references) > 0 {
+		images := make([]map[string]string, 0, len(references))
+		for _, reference := range references {
+			images = append(images, map[string]string{"image_url": reference.Src})
+		}
+		requestPayload["images"] = images
+		requestURL = s.localEditsURL
+	}
+
+	body, err := json.Marshal(requestPayload)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.localURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -343,13 +443,15 @@ func (s *ImageGenerationHistoryService) callImagesGateway(ctx context.Context, t
 
 func (s *ImageGenerationHistoryService) failRecord(ctx context.Context, recordID, userID int64, message string) error {
 	if userID > 0 {
-		_, err := s.Update(ctx, UpdateImageGenerationInput{
-			UserID:       userID,
-			ID:           recordID,
-			Status:       string(ImageGenerationStatusFailed),
-			Images:       json.RawMessage("[]"),
-			ErrorMessage: strings.TrimSpace(message),
-		})
+		_, err := s.db.ExecContext(ctx, `
+			UPDATE user_image_generations
+			SET status = 'failed',
+			    images = '[]'::jsonb,
+			    error_message = $1,
+			    updated_at = NOW(),
+			    completed_at = COALESCE(completed_at, NOW())
+			WHERE id = $2 AND user_id = $3 AND status = 'processing'
+		`, strings.TrimSpace(message), recordID, userID)
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, `
@@ -359,9 +461,43 @@ func (s *ImageGenerationHistoryService) failRecord(ctx context.Context, recordID
 		    error_message = $1,
 		    updated_at = NOW(),
 		    completed_at = COALESCE(completed_at, NOW())
-		WHERE id = $2
+		WHERE id = $2 AND status = 'processing'
 	`, strings.TrimSpace(message), recordID)
 	return err
+}
+
+func (s *ImageGenerationHistoryService) completeRecord(ctx context.Context, recordID, userID int64, images json.RawMessage) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE user_image_generations
+		SET status = 'completed',
+		    images = $1::jsonb,
+		    error_message = '',
+		    updated_at = NOW(),
+		    completed_at = COALESCE(completed_at, NOW())
+		WHERE id = $2 AND user_id = $3 AND status = 'processing'
+	`, string(images), recordID, userID)
+	return err
+}
+
+func (s *ImageGenerationHistoryService) registerActiveTask(recordID int64, cancel context.CancelFunc) {
+	s.activeMu.Lock()
+	defer s.activeMu.Unlock()
+	s.activeTasks[recordID] = cancel
+}
+
+func (s *ImageGenerationHistoryService) unregisterActiveTask(recordID int64) {
+	s.activeMu.Lock()
+	defer s.activeMu.Unlock()
+	delete(s.activeTasks, recordID)
+}
+
+func (s *ImageGenerationHistoryService) cancelActiveTask(recordID int64) {
+	s.activeMu.Lock()
+	cancel := s.activeTasks[recordID]
+	s.activeMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func extractImageGatewayError(body []byte, statusCode int) string {
@@ -400,6 +536,7 @@ func scanImageGenerationRecord(scanner imageGenerationScanner) (ImageGenerationR
 		&record.Prompt,
 		&record.Status,
 		&record.Images,
+		&record.ReferenceImages,
 		&record.ErrorMessage,
 		&record.CreatedAt,
 		&record.UpdatedAt,
@@ -416,5 +553,103 @@ func scanImageGenerationRecord(scanner imageGenerationScanner) (ImageGenerationR
 	if len(record.Images) == 0 {
 		record.Images = json.RawMessage("[]")
 	}
+	if len(record.ReferenceImages) == 0 {
+		record.ReferenceImages = json.RawMessage("[]")
+	}
 	return record, nil
+}
+
+type imageGenerationReferenceImage struct {
+	Src         string `json:"src"`
+	Name        string `json:"name,omitempty"`
+	ContentType string `json:"contentType,omitempty"`
+	Size        int64  `json:"size,omitempty"`
+}
+
+func normalizeImageGenerationReferenceImages(raw json.RawMessage) (json.RawMessage, error) {
+	if len(raw) == 0 {
+		return json.RawMessage("[]"), nil
+	}
+	images, err := decodeImageGenerationReferenceImages(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(images) == 0 {
+		return json.RawMessage("[]"), nil
+	}
+	normalized, err := json.Marshal(images)
+	if err != nil {
+		return nil, fmt.Errorf("encode reference images: %w", err)
+	}
+	return normalized, nil
+}
+
+func decodeImageGenerationReferenceImages(raw json.RawMessage) ([]imageGenerationReferenceImage, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if !json.Valid(raw) {
+		return nil, errors.New("reference_images must be valid json")
+	}
+	var images []imageGenerationReferenceImage
+	if err := json.Unmarshal(raw, &images); err != nil {
+		return nil, errors.New("reference_images must be an array")
+	}
+	if len(images) > maxImageGenerationReferenceImages {
+		return nil, fmt.Errorf("reference_images supports at most %d images", maxImageGenerationReferenceImages)
+	}
+
+	totalBytes := int64(0)
+	for i := range images {
+		images[i].Src = strings.TrimSpace(images[i].Src)
+		images[i].Name = strings.TrimSpace(images[i].Name)
+		images[i].ContentType = strings.TrimSpace(images[i].ContentType)
+		if images[i].Src == "" {
+			return nil, errors.New("reference_images[].src is required")
+		}
+		if !isSupportedImageReferenceURL(images[i].Src) {
+			return nil, errors.New("reference_images[].src must be a data:image URL or http image URL")
+		}
+		size := estimateImageReferenceBytes(images[i].Src, images[i].Size)
+		if size > maxImageGenerationReferenceImageBytes {
+			return nil, fmt.Errorf("reference image %d exceeds %dMB", i+1, maxImageGenerationReferenceImageBytes>>20)
+		}
+		if size > 0 {
+			images[i].Size = size
+			totalBytes += size
+		}
+	}
+	if totalBytes > maxImageGenerationReferenceImagesBytes {
+		return nil, fmt.Errorf("reference images exceed %dMB in total", maxImageGenerationReferenceImagesBytes>>20)
+	}
+	return images, nil
+}
+
+func isSupportedImageReferenceURL(src string) bool {
+	lower := strings.ToLower(strings.TrimSpace(src))
+	return strings.HasPrefix(lower, "data:image/") ||
+		strings.HasPrefix(lower, "http://") ||
+		strings.HasPrefix(lower, "https://")
+}
+
+func estimateImageReferenceBytes(src string, declared int64) int64 {
+	if declared > 0 {
+		return declared
+	}
+	lower := strings.ToLower(src)
+	if !strings.HasPrefix(lower, "data:image/") {
+		return 0
+	}
+	idx := strings.Index(src, ",")
+	if idx < 0 || idx+1 >= len(src) {
+		return int64(len(src))
+	}
+	encoded := src[idx+1:]
+	if strings.Contains(lower[:idx], ";base64") {
+		if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil {
+			return int64(len(decoded))
+		}
+		return int64(len(encoded) * 3 / 4)
+	}
+	return int64(len(encoded))
 }

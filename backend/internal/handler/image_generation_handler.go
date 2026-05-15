@@ -21,10 +21,11 @@ func NewImageGenerationHandler(service *service.ImageGenerationHistoryService) *
 }
 
 type createImageGenerationRequest struct {
-	APIKeyID int64  `json:"api_key_id" binding:"required"`
-	Model    string `json:"model" binding:"required"`
-	Size     string `json:"size"`
-	Prompt   string `json:"prompt" binding:"required"`
+	APIKeyID        int64           `json:"api_key_id" binding:"required"`
+	Model           string          `json:"model" binding:"required"`
+	Size            string          `json:"size"`
+	Prompt          string          `json:"prompt" binding:"required"`
+	ReferenceImages json.RawMessage `json:"reference_images"`
 }
 
 type updateImageGenerationRequest struct {
@@ -63,11 +64,12 @@ func (h *ImageGenerationHandler) Create(c *gin.Context) {
 	}
 
 	record, err := h.service.CreateAndStart(c.Request.Context(), service.CreateImageGenerationInput{
-		UserID:   subject.UserID,
-		APIKeyID: req.APIKeyID,
-		Model:    req.Model,
-		Size:     req.Size,
-		Prompt:   req.Prompt,
+		UserID:          subject.UserID,
+		APIKeyID:        req.APIKeyID,
+		Model:           req.Model,
+		Size:            req.Size,
+		Prompt:          req.Prompt,
+		ReferenceImages: req.ReferenceImages,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrImageGenerationAlreadyProcessing) {
@@ -106,6 +108,27 @@ func (h *ImageGenerationHandler) Update(c *gin.Context) {
 		Images:       req.Images,
 		ErrorMessage: req.ErrorMessage,
 	})
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, record)
+}
+
+func (h *ImageGenerationHandler) Cancel(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "Invalid image generation ID")
+		return
+	}
+
+	record, err := h.service.Cancel(c.Request.Context(), subject.UserID, id)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return

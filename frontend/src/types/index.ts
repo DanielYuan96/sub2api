@@ -637,11 +637,18 @@ export interface GenerateImageResponse {
   data: GeneratedImageItem[]
 }
 
-export type ImageGenerationStatus = 'processing' | 'completed' | 'failed'
+export type ImageGenerationStatus = 'processing' | 'completed' | 'failed' | 'cancelled'
 
 export interface ImageGenerationStoredImage {
   src: string
   revisedPrompt?: string
+}
+
+export interface ImageGenerationReferenceImage {
+  src: string
+  name?: string
+  contentType?: string
+  size?: number
 }
 
 export interface ImageGenerationRecord {
@@ -654,6 +661,7 @@ export interface ImageGenerationRecord {
   prompt: string
   status: ImageGenerationStatus
   images: ImageGenerationStoredImage[]
+  reference_images: ImageGenerationReferenceImage[]
   error_message: string
   created_at: string
   updated_at: string
@@ -665,6 +673,7 @@ export interface CreateImageGenerationRecordRequest {
   model: string
   size?: string
   prompt: string
+  reference_images?: ImageGenerationReferenceImage[]
 }
 
 export interface UpdateImageGenerationRecordRequest {

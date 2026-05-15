@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { imagesAPI } from '@/api'
-import type { ImageGenerationRecord, ImageGenerationStoredImage } from '@/types'
+import type { ImageGenerationRecord, ImageGenerationReferenceImage, ImageGenerationStoredImage } from '@/types'
 
 export type ImageChatMessage = {
   id: string
@@ -13,8 +13,10 @@ export type ImageChatMessage = {
     size: string
   }
   loading?: boolean
+  cancelled?: boolean
   error?: string
   images?: ImageGenerationStoredImage[]
+  referenceImages?: ImageGenerationReferenceImage[]
   recordId?: number
 }
 
@@ -24,12 +26,14 @@ export type SubmitImageGenerationInput = {
   model: string
   size: string
   prompt: string
-  labels: {
-    generating: string
-    generated: string
-    failed: string
-    noImageReturned: string
-  }
+  referenceImages?: ImageGenerationReferenceImage[]
+    labels: {
+      generating: string
+      generated: string
+      failed: string
+      cancelled: string
+      noImageReturned: string
+    }
 }
 
 export const useImageGenerationStore = defineStore('imageGeneration', () => {
@@ -69,7 +73,8 @@ export const useImageGenerationStore = defineStore('imageGeneration', () => {
         api_key_id: input.apiKeyId,
         model: input.model,
         size: input.size,
-        prompt: requestPrompt
+        prompt: requestPrompt,
+        reference_images: input.referenceImages || []
       })
       assistantId = pushProcessingMessages(record, input.labels.generating)
 
@@ -96,6 +101,7 @@ export const useImageGenerationStore = defineStore('imageGeneration', () => {
       id: userId,
       role: 'user',
       content: record.prompt,
+      referenceImages: record.reference_images || [],
       meta: {
         keyName: record.api_key_name,
         model: record.model,
@@ -148,12 +154,28 @@ export const useImageGenerationStore = defineStore('imageGeneration', () => {
     Object.assign(target, patch)
   }
 
+  async function cancel(recordId: number, labels: { cancelled: string; failed: string }) {
+    const record = await imagesAPI.cancelImageGenerationRecord(recordId)
+    const assistantId = `image-record-${record.id}-assistant`
+    updateAssistantMessage(assistantId, recordToAssistantMessage(record, {
+      generated: '',
+      failed: labels.failed,
+      generating: '',
+      cancelled: labels.cancelled,
+    }))
+    const records = await imagesAPI.listImageGenerationRecords(50)
+    syncMessagesFromRecords(records)
+    updatePolling()
+    return record
+  }
+
   function recordToMessages(record: ImageGenerationRecord): ImageChatMessage[] {
     return [
       {
         id: `image-record-${record.id}-user`,
         role: 'user',
         content: record.prompt,
+        referenceImages: record.reference_images || [],
         meta: {
           keyName: record.api_key_name,
           model: record.model,
@@ -167,10 +189,11 @@ export const useImageGenerationStore = defineStore('imageGeneration', () => {
 
   function recordToAssistantMessage(
     record: ImageGenerationRecord,
-    labels?: { generated: string; failed: string; generating: string }
+    labels?: { generated: string; failed: string; generating: string; cancelled?: string }
   ): ImageChatMessage {
     const loading = record.status === 'processing'
     const failed = record.status === 'failed'
+    const cancelled = record.status === 'cancelled'
     const images = record.images || []
     return {
       id: `image-record-${record.id}-assistant`,
@@ -179,8 +202,11 @@ export const useImageGenerationStore = defineStore('imageGeneration', () => {
         ? (labels?.generating || '生成中')
         : failed
           ? (labels?.failed || '生成失败')
-          : (labels?.generated || '图片已生成'),
+          : cancelled
+            ? (labels?.cancelled || '已终止')
+            : (labels?.generated || '图片已生成'),
       loading,
+      cancelled,
       error: failed ? record.error_message : undefined,
       images,
       meta: {
@@ -198,5 +224,6 @@ export const useImageGenerationStore = defineStore('imageGeneration', () => {
     historyLoaded,
     loadHistory,
     submit,
+    cancel,
   }
 })

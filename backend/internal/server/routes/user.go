@@ -27,6 +27,7 @@ func RegisterUserRoutes(
 			user.GET("/image-generations", h.ImageGeneration.List)
 			user.POST("/image-generations", h.ImageGeneration.Create)
 			user.PATCH("/image-generations/:id", h.ImageGeneration.Update)
+			user.POST("/image-generations/:id/cancel", h.ImageGeneration.Cancel)
 			user.PUT("/password", h.User.ChangePassword)
 			user.PUT("", h.User.UpdateProfile)
 			user.GET("/aff", h.User.GetAffiliate)
